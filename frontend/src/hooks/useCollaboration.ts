@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { api } from '@/lib/api';
 
 export interface CollaboratorUser {
   id: string;
@@ -86,8 +87,8 @@ export function useCollaboration(
 
     let reconnectTimer: NodeJS.Timeout;
 
-    const connect = () => {
-      const token = localStorage.getItem('token');
+    let disposed = false;
+    const connect = async () => {
       const wsUrl = getWebSocketUrl();
 
       if (!wsUrl) {
@@ -97,7 +98,15 @@ export function useCollaboration(
       }
 
       try {
-        const ws = new WebSocket(`${wsUrl}/${roomId}?token=${token}`);
+        const { ticket, userId } = await api('/auth/ws-ticket', {
+          method: 'POST',
+          body: JSON.stringify({ roomId }),
+        });
+        if (disposed) return;
+        const ws = new WebSocket(`${wsUrl}/${encodeURIComponent(roomId)}`, [
+          'tesseract',
+          `tesseract-ticket.${ticket}`,
+        ]);
         wsRef.current = ws;
 
         ws.onopen = () => {
@@ -119,16 +128,7 @@ export function useCollaboration(
         };
       
       const myUserId = (() => {
-        if (!token) return null;
-        try {
-          const payload = token.split('.')[1];
-          if (!payload) return null;
-          const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
-          const parsed = JSON.parse(json);
-          return parsed.userId || parsed.id || null;
-        } catch {
-          return null;
-        }
+        return userId || null;
       })();
 
       ws.onmessage = (event) => {
@@ -174,6 +174,7 @@ export function useCollaboration(
   connect();
 
     return () => {
+      disposed = true;
       console.log('[useCollaboration] Cleaning up WS');
       clearTimeout(reconnectTimer);
       if (wsRef.current) {

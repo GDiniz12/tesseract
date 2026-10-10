@@ -3,11 +3,13 @@ import { IncomingMessage } from 'http';
 import jwt from 'jsonwebtoken';
 import url from 'url';
 import { prisma } from '../config/prisma';
+import { allowedOrigins } from '../config/security';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-for-dev';
 
 // Map of roomId (notaId) to Set of connected clients
 const rooms = new Map<string, Set<WebSocket>>();
+const usedTickets = new Map<string, number>();
 
 // Map to store user info per socket
 interface SocketUser {
@@ -61,22 +63,47 @@ function broadcastUsersList(roomId: string) {
 
 export function initializeWebSockets(wss: WebSocketServer) {
   wss.on('connection', async (ws: WebSocket, req: IncomingMessage) => {
-    const parsedUrl = url.parse(req.url || '', true);
-    const token = parsedUrl.query.token as string;
-    const roomId = parsedUrl.pathname?.slice(1) || ''; // e.g. "nota_123"
+    const origin = req.headers.origin;
+    if (origin && !allowedOrigins.includes(origin)) {
+      ws.close(4003, 'Origin is not allowed');
+      return;
+    }
 
-    if (!token || !roomId) {
+    const parsedUrl = url.parse(req.url || '', true);
+    const protocolHeader = req.headers['sec-websocket-protocol'] || '';
+    const ticketProtocol = protocolHeader.split(',').map((protocol) => protocol.trim())
+      .find((protocol) => protocol.startsWith('tesseract-ticket.'));
+    const ticket = ticketProtocol?.slice('tesseract-ticket.'.length);
+    let roomId = '';
+    try {
+      roomId = decodeURIComponent(parsedUrl.pathname?.slice(1) || ''); // workspaceId:notaId
+    } catch {
+      ws.close(4001, 'Invalid room');
+      return;
+    }
+
+    if (!ticket || !roomId) {
       ws.close(4001, 'Unauthorized or missing room');
       return;
     }
 
-    let decoded: any;
+    let decoded: { userId: string; authVersion: number; purpose: string; roomId: string; jti?: string };
     try {
-      decoded = jwt.verify(token, JWT_SECRET);
+      decoded = jwt.verify(ticket, JWT_SECRET) as typeof decoded;
     } catch (err) {
       ws.close(4001, 'Unauthorized: Invalid token');
       return;
     }
+
+    const now = Date.now();
+    for (const [ticketId, expiresAt] of usedTickets) {
+      if (expiresAt <= now) usedTickets.delete(ticketId);
+    }
+    if (decoded.purpose !== 'collaboration' || decoded.roomId !== roomId || !decoded.jti || usedTickets.has(decoded.jti)) {
+      ws.close(4001, 'Unauthorized: Invalid ticket');
+      return;
+    }
+    usedTickets.set(decoded.jti, now + 30_000);
 
     const userId = decoded.userId;
     
@@ -87,15 +114,33 @@ export function initializeWebSockets(wss: WebSocketServer) {
     try {
       const user = await prisma.user.findUnique({ 
         where: { id: userId },
-        select: { id: true, name: true, username: true, email: true, avatarUrl: true }
+        select: { id: true, name: true, username: true, email: true, avatarUrl: true, authVersion: true }
       });
-      if (user) {
+      if (user && user.authVersion === decoded.authVersion) {
+        const [workspaceId, noteId, ...extra] = roomId.split(':');
+        const membership = extra.length === 0 ? await prisma.workspace.findFirst({
+          where: {
+            id: workspaceId,
+            notas: { some: { id: noteId } },
+            OR: [{ userId }, { collaborators: { some: { userId } } }],
+          },
+          select: { id: true },
+        }) : null;
+        if (!membership) {
+          ws.close(4003, 'Unauthorized: Room access denied');
+          return;
+        }
         userName = user.name || (user.username ? `@${user.username}` : user.email.split('@')[0]);
         userUsername = user.username;
         userAvatarUrl = user.avatarUrl;
+      } else {
+        ws.close(4001, 'Unauthorized: Session expired');
+        return;
       }
     } catch (e) {
       console.error('Failed to fetch user', e);
+      ws.close(1011, 'Unable to validate session');
+      return;
     }
     
     // Store user data

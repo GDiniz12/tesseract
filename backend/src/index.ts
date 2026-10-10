@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import routes from './routes';
+import { allowedOrigins } from './config/security';
 
 dotenv.config();
 
@@ -11,23 +12,31 @@ const port = process.env.PORT || 3000;
 
 app.set('trust proxy', 1);
 
-const allowedOrigins = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
-  : ['*'];
-
 app.use(
   cors({
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      // Allow requests with no origin (like mobile apps, curl, postman) or if allowedOrigins is '*'
-      if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+      if (!origin) {
         return callback(null, true);
       }
-      return callback(null, true); // Permissive fallback to prevent breaking cross-domain Vercel previews
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(null, false);
     },
-    credentials: true,
+    credentials: false,
   })
 );
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
+  if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
+});
 app.use(express.json());
+app.disable('x-powered-by');
 
 // Serve uploaded static files
 app.use('/uploads', express.static(path.resolve(__dirname, '../uploads')));

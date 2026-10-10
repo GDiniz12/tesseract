@@ -13,6 +13,7 @@ model User {
   name        String?
   avatarUrl   String?
   password    String
+  authVersion Int         @default(0)
   preferences Json?
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
@@ -138,4 +139,3 @@ model AiChatMessage {
   metadata    Json?
   createdAt   DateTime     @default(now())
 }
-

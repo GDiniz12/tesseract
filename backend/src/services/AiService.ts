@@ -1,6 +1,7 @@
 import { prisma } from '../config/prisma';
 import { Response } from 'express';
 import { marked } from 'marked';
+import { sanitizeNoteHtml } from '../utils/sanitizeNoteHtml';
 
 export function ensureHtmlContent(raw: string): string {
   if (!raw || typeof raw !== 'string') return '';
@@ -978,7 +979,7 @@ O usuário está visualizando/editando esta nota agora. Se ele pedir para resumi
                 result = { error: 'Nota não encontrada no workspace.' };
               }
             } else if (fnName === 'create_new_note') {
-              const htmlContent = ensureHtmlContent(fnArgs.content);
+              const htmlContent = sanitizeNoteHtml(ensureHtmlContent(fnArgs.content));
               const newNota = await prisma.nota.create({
                 data: {
                   workspaceId,
@@ -991,7 +992,7 @@ O usuário está visualizando/editando esta nota agora. Se ele pedir para resumi
               createdEntities.notesCreated.push({ id: newNota.id, titulo: newNota.titulo });
               result = { success: true, createdNote: { id: newNota.id, title: newNota.titulo } };
             } else if (fnName === 'update_active_note') {
-              const htmlContent = ensureHtmlContent(fnArgs.content);
+              const htmlContent = sanitizeNoteHtml(ensureHtmlContent(fnArgs.content));
               const updated = await prisma.nota.update({
                 where: { id: fnArgs.noteId },
                 data: {

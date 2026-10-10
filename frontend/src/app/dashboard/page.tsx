@@ -44,16 +44,16 @@ export default function DashboardPage() {
       setCurrentUser(userData);
       setWorkspaces(workspacesData || []);
     } catch (err: any) {
-      console.error('Failed to load initial dashboard data', err);
       if (
         err.message === 'Token is invalid' ||
         err.message === 'Token is missing' ||
-        err.message === 'User no longer exists'
+        err.message === 'User no longer exists' ||
+        err.message === 'Session expired or revoked'
       ) {
-        localStorage.removeItem('token');
         router.push('/login');
         return;
       }
+      console.error('Failed to load initial dashboard data', err);
       setError('Não foi possível carregar as informações do dashboard.');
     } finally {
       setIsLoading(false);
@@ -61,11 +61,6 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      router.push('/login');
-      return;
-    }
     loadInitialData();
   }, [router]);
 
@@ -310,10 +305,15 @@ export default function DashboardPage() {
       {/* Logout Confirmation Modal */}
       {isLogoutConfirmOpen && (
         <LogoutConfirmModal
-          onConfirm={() => {
-            setIsLogoutConfirmOpen(false);
-            localStorage.removeItem('token');
-            router.push('/login');
+          onConfirm={async () => {
+            try {
+              await api('/auth/logout', { method: 'POST' });
+              setIsLogoutConfirmOpen(false);
+              router.push('/login');
+            } catch (error) {
+              console.error('Logout failed', error);
+              showToast('Não foi possível encerrar a sessão. Tente novamente.');
+            }
           }}
           onClose={() => setIsLogoutConfirmOpen(false)}
         />

@@ -10,6 +10,7 @@ import katex from 'katex';
 import { marked } from 'marked';
 import { parseYouTubeVideoId, getYouTubeEmbedUrl } from '@/lib/youtube';
 import { extractGraphLinks } from '@/lib/graphLinks';
+import { sanitizeHtml } from '@/lib/sanitizeHtml';
 
 // Configure marked for rich GFM parsing
 marked.setOptions({
@@ -33,13 +34,13 @@ export function ensureHtmlContent(raw: string): string {
 
   // If already has common HTML block tags, return formatted
   if (/<\s*(p|h[1-6]|div|table|ul|ol|blockquote|pre)\b/i.test(formatted)) {
-    return formatted;
+    return sanitizeHtml(formatted);
   }
   try {
     const parsed = marked.parse(formatted) as string;
-    return parsed;
+    return sanitizeHtml(parsed);
   } catch (err) {
-    return formatted;
+    return sanitizeHtml(formatted);
   }
 }
 
@@ -255,9 +256,10 @@ function Editor({
     isCollaborative && notaId ? `${workspaceId}:${notaId}` : undefined,
     'document_change',
     (newVal: string) => {
-      parentOnChange(newVal);
+      const safeValue = ensureHtmlContent(newVal);
+      parentOnChange(safeValue);
       if (editorRef.current && editorRef.current.innerHTML !== newVal) {
-        editorRef.current.innerHTML = newVal; 
+        editorRef.current.innerHTML = safeValue;
       }
     }
   );
@@ -441,7 +443,7 @@ function Editor({
   // Initialize content once on mount imperatively to keep contentEditable isolated from React reconciliation
   useEffect(() => {
     if (editorRef.current && !isInitializedRef.current) {
-      editorRef.current.innerHTML = initialValueRef.current;
+      editorRef.current.innerHTML = ensureHtmlContent(initialValueRef.current);
       isInitializedRef.current = true;
     }
   }, []);
@@ -571,7 +573,10 @@ function Editor({
     a.setAttribute('data-note-id', targetNota.id);
     a.href = `#note-${targetNota.id}`;
     a.title = `Abrir nota: ${targetNota.titulo}`;
-    a.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.75;flex-shrink:0;"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg><span>${targetNota.titulo}</span>`;
+    a.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.75;flex-shrink:0;"><path d="M10 13a5 5 0 0 1 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>';
+    const label = document.createElement('span');
+    label.textContent = targetNota.titulo;
+    a.appendChild(label);
 
     range.insertNode(a);
 
@@ -636,7 +641,10 @@ function Editor({
     a.setAttribute('data-card-id', targetCard.id);
     a.href = `#card-${targetCard.id}`;
     a.title = `Flashcard: ${targetCard.frente}`;
-    a.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.75;flex-shrink:0;"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg><span>${targetCard.frente}</span>`;
+    a.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.75;flex-shrink:0;"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>';
+    const label = document.createElement('span');
+    label.textContent = targetCard.frente;
+    a.appendChild(label);
 
     range.insertNode(a);
 

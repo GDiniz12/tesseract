@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import Link from 'next/link';
+import { api } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import TesseractLogo from '@/components/TesseractLogo';
 import LandingTesseractGraph from '@/components/LandingTesseractGraph';
@@ -44,16 +45,11 @@ export default function LandingPage() {
   };
 
   useEffect(() => {
-    let token: string | null = null;
-    try {
-      token = localStorage.getItem('token');
-    } catch {
-      /* Browsing without storage still supports the public page. */
-    }
-
     // If running inside Electron desktop app, immediately bypass landing page
     if (window.tesseractDesktop?.isDesktop || window.synapDesktop?.isDesktop) {
-      router.replace(token ? '/dashboard' : '/login');
+      api('/auth/me')
+        .then(() => router.replace('/dashboard'))
+        .catch(() => router.replace('/login'));
       return;
     }
   }, [router]);

@@ -33,16 +33,12 @@ function LoginForm() {
         body: JSON.stringify({ email: email.trim(), password }),
       });
       
-      const token = data.token;
-      localStorage.setItem('token', token);
-
       const inviteCode = searchParams.get('inviteCode') || localStorage.getItem('pending_invite_code') || sessionStorage.getItem('pending_invite_code');
 
       if (inviteCode) {
         try {
           const joinResult = await api(`/workspaces/join/${inviteCode}`, {
             method: 'POST',
-            headers: { Authorization: `Bearer ${token}` }
           });
           localStorage.removeItem('pending_invite_code');
           sessionStorage.removeItem('pending_invite_code');

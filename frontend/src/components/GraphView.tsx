@@ -8,6 +8,7 @@ import { useTheme } from './ThemeProvider';
 import IsometricGraph from './graph/IsometricGraph';
 import ObsidianGraph from './graph/ObsidianGraph';
 import { extractGraphLinks } from '@/lib/graphLinks';
+import { sanitizeHtml } from '@/lib/sanitizeHtml';
 
 export type GroupRuleType = 'pasta' | 'tag' | 'titulo' | 'conteudo' | 'tipo';
 
@@ -870,7 +871,7 @@ export default function GraphView({
             ) : hoveredNota.conteudo && hoveredNota.conteudo.trim() ? (
               <div
                 className="notion-editor text-[12px] leading-[1.5] text-[#dbdee1]"
-                dangerouslySetInnerHTML={{ __html: hoveredNota.conteudo }}
+                dangerouslySetInnerHTML={{ __html: sanitizeHtml(hoveredNota.conteudo) }}
                 style={{ wordBreak: 'break-word' }}
               />
             ) : (

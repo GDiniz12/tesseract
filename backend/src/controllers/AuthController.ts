@@ -1,10 +1,40 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { randomUUID } from 'crypto';
 import { prisma } from '../config/prisma';
 import { deleteUploadedFile } from '../utils/fileStorage';
+import { AuthRequest } from '../middlewares/authMiddleware';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-for-dev';
+const SESSION_COOKIE = 'tesseract_session';
+const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+function isSecureRequest(req: Request) {
+  return req.secure || req.headers['x-forwarded-proto'] === 'https';
+}
+
+function sessionCookieOptions(req: Request) {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production' || isSecureRequest(req),
+    sameSite: 'lax' as const,
+    path: '/',
+    maxAge: SESSION_MAX_AGE_MS,
+  };
+}
+
+function issueSession(req: Request, res: Response, userId: string, authVersion: number) {
+  const token = jwt.sign({ userId, authVersion }, JWT_SECRET, { expiresIn: '7d' });
+  if (req.get('x-session-mode') === 'cookie') {
+    res.cookie(SESSION_COOKIE, token, sessionCookieOptions(req));
+  }
+  return token;
+}
+
+function includeBearerToken(req: Request) {
+  return req.get('x-session-mode') !== 'cookie';
+}
 
 export class AuthController {
   async register(req: Request, res: Response) {
@@ -60,10 +90,13 @@ export class AuthController {
           preferences: true,
           createdAt: true,
           updatedAt: true,
+          authVersion: true,
         }
       });
 
-      res.status(201).json(user);
+      const token = issueSession(req, res, user.id, user.authVersion);
+      const { authVersion: _authVersion, ...publicUser } = user;
+      res.status(201).json({ ...publicUser, ...(includeBearerToken(req) ? { token } : {}) });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -99,7 +132,7 @@ export class AuthController {
         return res.status(401).json({ error: 'Credenciais inválidas' });
       }
 
-      const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
+      const token = issueSession(req, res, user.id, user.authVersion);
 
       res.status(200).json({
         user: {
@@ -110,7 +143,7 @@ export class AuthController {
           avatarUrl: user.avatarUrl,
           preferences: user.preferences,
         },
-        token
+        ...(includeBearerToken(req) ? { token } : {})
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -136,6 +169,50 @@ export class AuthController {
       res.status(200).json(user);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  }
+
+  async logout(req: AuthRequest, res: Response) {
+    try {
+      if (req.userId) {
+        await prisma.user.update({ where: { id: req.userId }, data: { authVersion: { increment: 1 } } });
+      }
+      res.clearCookie(SESSION_COOKIE, { ...sessionCookieOptions(req), maxAge: undefined });
+      return res.status(204).end();
+    } catch (error: any) {
+      return res.status(500).json({ error: error.message });
+    }
+  }
+
+  async createWebSocketTicket(req: AuthRequest, res: Response) {
+    try {
+      const roomId = typeof req.body?.roomId === 'string' ? req.body.roomId : '';
+      const [workspaceId, noteId, ...extra] = roomId.split(':');
+      if (!workspaceId || !noteId || extra.length) {
+        return res.status(400).json({ error: 'Invalid collaboration room' });
+      }
+
+      const membership = await prisma.workspace.findFirst({
+        where: {
+          id: workspaceId,
+          notas: { some: { id: noteId } },
+          OR: [
+            { userId: req.userId },
+            { collaborators: { some: { userId: req.userId } } },
+          ],
+        },
+        select: { id: true },
+      });
+      if (!membership) return res.status(404).json({ error: 'Collaboration room not found' });
+
+      const ticket = jwt.sign(
+        { userId: req.userId, authVersion: req.authVersion ?? 0, purpose: 'collaboration', roomId },
+        JWT_SECRET,
+        { expiresIn: '30s', jwtid: randomUUID() }
+      );
+      return res.status(200).json({ ticket, userId: req.userId });
+    } catch (error: any) {
+      return res.status(500).json({ error: error.message });
     }
   }
 
@@ -193,6 +270,7 @@ export class AuthController {
       const newPass = senha || password;
       if (newPass) {
         updateData.password = await bcrypt.hash(newPass, 10);
+        updateData.authVersion = { increment: 1 };
       }
 
       const updated = await prisma.user.update({
@@ -207,10 +285,13 @@ export class AuthController {
           preferences: true,
           createdAt: true,
           updatedAt: true,
+          authVersion: true,
         }
       });
 
-      res.status(200).json(updated);
+      const token = newPass ? issueSession(req, res, updated.id, updated.authVersion) : undefined;
+      const { authVersion: _authVersion, ...publicUser } = updated;
+      res.status(200).json({ ...publicUser, ...(token && includeBearerToken(req) ? { token } : {}) });
     } catch (error: any) {
       res.status(500).json({ error: error.message || 'Erro ao atualizar usuário.' });
     }

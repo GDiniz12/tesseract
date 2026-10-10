@@ -431,13 +431,7 @@ export default function MainPage() {
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-    const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || '/api';
-    const baseUrl = rawApiUrl.startsWith('http')
-      ? rawApiUrl.replace(/\/+$/, '').endsWith('/api')
-        ? rawApiUrl.replace(/\/+$/, '')
-        : `${rawApiUrl.replace(/\/+$/, '')}/api`
-      : '/api';
+    const baseUrl = '/api';
 
     const currentWorkspaceId = activeWorkspace?.id;
     if (!currentWorkspaceId) {
@@ -451,10 +445,10 @@ export default function MainPage() {
     try {
       const response = await fetch(`${baseUrl}/ai/workspace/${currentWorkspaceId}/chat`, {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
           'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': 'true',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          'X-Session-Mode': 'cookie',
         },
         body: JSON.stringify({
           threadId: selectedThread?.id,
@@ -817,21 +811,18 @@ export default function MainPage() {
     const fetchData = async () => {
       setIsLoadingData(true);
       try {
-        const token = localStorage.getItem('token');
-        if (!token) {
+        const userData = await api('/auth/me').catch(() => null);
+        if (!userData) {
           setIsLoadingData(false);
           router.push('/login');
           return;
         }
 
-        const [wsList, userData] = await Promise.all([
+        const [wsList] = await Promise.all([
           api('/workspaces').catch(() => []),
-          api('/auth/me').catch(() => null),
         ]);
 
-        if (userData) {
-          setCurrentUser(userData);
-        }
+        setCurrentUser(userData);
 
         if (wsList && wsList.length > 0) {
           setWorkspaces(wsList);

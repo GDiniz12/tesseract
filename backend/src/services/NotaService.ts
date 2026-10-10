@@ -1,10 +1,14 @@
 import { prisma } from '../config/prisma';
 import { Prisma } from '@prisma/client';
 import { deleteMultipleUploadedFiles } from '../utils/fileStorage';
+import { sanitizeNoteHtml } from '../utils/sanitizeNoteHtml';
 
 export class NotaService {
   async createNota(data: Prisma.NotaUncheckedCreateInput) {
-    return prisma.nota.create({ data });
+    const safeData = data.tipo === 'desenho' || typeof data.conteudo !== 'string'
+      ? data
+      : { ...data, conteudo: sanitizeNoteHtml(data.conteudo) };
+    return prisma.nota.create({ data: safeData });
   }
 
   async getNotas(workspaceId: string, pastaId?: string) {
@@ -20,7 +24,8 @@ export class NotaService {
   }
 
   async updateNota(id: string, data: Prisma.NotaUncheckedUpdateInput) {
-    return prisma.nota.update({ where: { id }, data });
+    const safeData = typeof data.conteudo === 'string' ? { ...data, conteudo: sanitizeNoteHtml(data.conteudo) } : data;
+    return prisma.nota.update({ where: { id }, data: safeData });
   }
 
   async deleteNota(id: string) {

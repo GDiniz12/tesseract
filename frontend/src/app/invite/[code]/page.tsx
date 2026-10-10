@@ -34,8 +34,7 @@ export default function InvitePage() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   useEffect(() => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-    setIsLoggedIn(!!token);
+    api('/auth/me').then(() => setIsLoggedIn(true)).catch(() => setIsLoggedIn(false));
 
     if (code) {
       try {
@@ -218,4 +217,3 @@ export default function InvitePage() {
     </div>
   );
 }
-

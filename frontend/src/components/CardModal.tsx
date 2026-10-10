@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { sanitizeHtml } from '@/lib/sanitizeHtml';
 
 export interface CardModalData {
   id: string;
@@ -123,7 +124,7 @@ export default function CardModal({ card, onOpenNota, onClose }: CardModalProps)
                     {card.nota.conteudo && (
                       <div
                         className="max-h-[160px] overflow-y-auto text-xs leading-relaxed text-zinc-300 prose dark:prose-invert max-w-none custom-scrollbar"
-                        dangerouslySetInnerHTML={{ __html: card.nota.conteudo }}
+                        dangerouslySetInnerHTML={{ __html: sanitizeHtml(card.nota.conteudo) }}
                       />
                     )}
                   </div>

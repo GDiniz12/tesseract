@@ -725,21 +725,15 @@ export default function AiChatView({
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-    const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || '/api';
-    const baseUrl = rawApiUrl.startsWith('http')
-      ? rawApiUrl.replace(/\/+$/, '').endsWith('/api')
-        ? rawApiUrl.replace(/\/+$/, '')
-        : `${rawApiUrl.replace(/\/+$/, '')}/api`
-      : '/api';
+    const baseUrl = '/api';
 
     try {
       const response = await fetch(`${baseUrl}/ai/workspace/${workspaceId}/chat`, {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
           'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': 'true',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          'X-Session-Mode': 'cookie',
         },
         body: JSON.stringify({
           threadId: activeThreadId,

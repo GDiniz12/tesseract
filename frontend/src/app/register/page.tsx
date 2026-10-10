@@ -67,14 +67,11 @@ function RegisterForm() {
           body: JSON.stringify({ email: email.trim(), password }),
         });
 
-        if (loginData?.token) {
-          localStorage.setItem('token', loginData.token);
-
+        if (loginData?.user) {
           if (inviteCode) {
             try {
               const joinResult = await api(`/workspaces/join/${inviteCode}`, {
                 method: 'POST',
-                headers: { Authorization: `Bearer ${loginData.token}` }
               });
               localStorage.removeItem('pending_invite_code');
               sessionStorage.removeItem('pending_invite_code');

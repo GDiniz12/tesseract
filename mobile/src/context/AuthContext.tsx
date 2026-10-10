@@ -89,9 +89,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
-    await storage.removeToken();
-    setToken(null);
-    setUser(null);
+    try {
+      await api('/auth/logout', { method: 'POST' });
+    } finally {
+      await storage.removeToken();
+      setToken(null);
+      setUser(null);
+    }
   };
 
   const updateApiUrl = async (newUrl: string) => {

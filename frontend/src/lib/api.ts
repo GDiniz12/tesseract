@@ -1,11 +1,4 @@
-const rawApiUrl = process.env.NEXT_PUBLIC_API_URL;
-const API_URL = rawApiUrl
-  ? (rawApiUrl.startsWith('http') 
-      ? (rawApiUrl.replace(/\/+$/, '').endsWith('/api') 
-          ? rawApiUrl.replace(/\/+$/, '') 
-          : `${rawApiUrl.replace(/\/+$/, '')}/api`)
-      : rawApiUrl)
-  : '/api';
+const API_URL = '/api';
 
 export interface ApiOptions extends RequestInit {
   retries?: number;
@@ -19,18 +12,16 @@ export const api = async (endpoint: string, options: ApiOptions = {}): Promise<a
     ...fetchOptions
   } = options;
 
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  if (typeof window !== 'undefined') {
+    try { localStorage.removeItem('token'); } catch {}
+  }
 
   const isFormData = typeof FormData !== 'undefined' && fetchOptions.body instanceof FormData;
   const headers: Record<string, string> = {
     ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
-    'ngrok-skip-browser-warning': 'true',
+    'X-Session-Mode': 'cookie',
     ...((fetchOptions.headers as Record<string, string>) || {}),
   };
-
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
 
   let attempt = 0;
   while (true) {
@@ -38,6 +29,7 @@ export const api = async (endpoint: string, options: ApiOptions = {}): Promise<a
       const response = await fetch(`${API_URL}${endpoint}`, {
         ...fetchOptions,
         headers,
+        credentials: 'same-origin',
       });
 
       // Transient cold start status codes on Render: 502, 503, 504
