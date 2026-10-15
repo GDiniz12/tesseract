@@ -45,13 +45,13 @@ export default function LandingPage() {
   };
 
   useEffect(() => {
-    // If running inside Electron desktop app, immediately bypass landing page
-    if (window.tesseractDesktop?.isDesktop || window.synapDesktop?.isDesktop) {
-      api('/auth/me')
-        .then(() => router.replace('/dashboard'))
-        .catch(() => router.replace('/login'));
-      return;
-    }
+    const isDesktop = Boolean(window.tesseractDesktop?.isDesktop || window.synapDesktop?.isDesktop);
+
+    api('/auth/me', { retries: isDesktop ? undefined : 0 })
+      .then(() => router.replace('/dashboard'))
+      .catch(() => {
+        if (isDesktop) router.replace('/login');
+      });
   }, [router]);
 
   return (
