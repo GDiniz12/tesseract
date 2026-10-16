@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../config/prisma';
 import { allowedOrigins } from '../config/security';
+import { createSessionToken, SESSION_COOKIE, setSessionCookie } from '../utils/session';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-for-dev';
 
@@ -9,8 +10,6 @@ export interface AuthRequest extends Request {
   userId?: string;
   authVersion?: number;
 }
-
-const SESSION_COOKIE = 'tesseract_session';
 
 function getCookie(req: Request, name: string): string | null {
   const cookieHeader = req.headers.cookie;
@@ -56,6 +55,14 @@ export async function authMiddleware(req: AuthRequest, res: Response, next: Next
 
     req.userId = decoded.userId;
     req.authVersion = user.authVersion;
+
+    if (usedCookie) {
+      // Refresh the inactivity window whenever a valid cookie session is used.
+      setSessionCookie(req, res, createSessionToken(user.id, user.authVersion));
+    } else {
+      res.setHeader('X-Session-Token', createSessionToken(user.id, user.authVersion));
+    }
+
     return next();
   } catch (error) {
     return res.status(401).json({ error: 'Token is invalid' });
@@ -63,7 +70,7 @@ export async function authMiddleware(req: AuthRequest, res: Response, next: Next
 }
 
 export async function optionalAuthMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
-  const { token } = getRequestToken(req);
+  const { token, usedCookie } = getRequestToken(req);
   if (!token) {
     return next();
   }
@@ -74,6 +81,12 @@ export async function optionalAuthMiddleware(req: AuthRequest, res: Response, ne
     if (user && (decoded.authVersion ?? 0) === user.authVersion) {
       req.userId = decoded.userId;
       req.authVersion = user.authVersion;
+      const refreshedToken = createSessionToken(user.id, user.authVersion);
+      if (usedCookie) {
+        setSessionCookie(req, res, refreshedToken);
+      } else {
+        res.setHeader('X-Session-Token', refreshedToken);
+      }
     }
   } catch (error) {
     // Silently continue for optional auth

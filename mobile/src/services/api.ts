@@ -58,6 +58,11 @@ export const api = async <T = any>(endpoint: string, options: ApiOptions = {}): 
         headers,
       });
 
+      const refreshedToken = response.headers.get('X-Session-Token');
+      if (refreshedToken) {
+        await storage.setToken(refreshedToken);
+      }
+
       // Transient cold start on cloud backend (502, 503, 504)
       if ([502, 503, 504].includes(response.status) && attempt < retries) {
         attempt++;

@@ -197,6 +197,8 @@ export default function DrawingCanvas({
     worldX: number;
     worldY: number;
     text: string;
+    fontSize: number;
+    color: string;
   } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const textMountedAtRef = useRef<number>(0);
@@ -217,6 +219,9 @@ export default function DrawingCanvas({
   const dragSelectedIdsRef = useRef<string[]>([]);
   const isPanningRef = useRef(false);
   const panStartRef = useRef<Point>({ x: 0, y: 0 });
+  const editOnClickRef = useRef<string | null>(null);
+  const dragStartClientRef = useRef<Point>({ x: 0, y: 0 });
+  const dragMovedRef = useRef(false);
 
   // Touch gesture refs
   const initialTouchDistanceRef = useRef<number | null>(null);
@@ -268,8 +273,8 @@ export default function DrawingCanvas({
           x: editingText.worldX,
           y: editingText.worldY,
           text: trimmed,
-          fontSize: 18,
-          strokeColor,
+          fontSize: editingText.fontSize,
+          strokeColor: editingText.color,
           fillColor: 'transparent',
           strokeWidth: 1,
         };
@@ -278,7 +283,7 @@ export default function DrawingCanvas({
     }
     editingTextIdRef.current = null;
     setEditingText(null);
-  }, [commitElements, editingText, elements, strokeColor]);
+  }, [commitElements, editingText, elements]);
 
   const handleUndo = useCallback(() => {
     if (historyIndex > 0) {
@@ -319,7 +324,7 @@ export default function DrawingCanvas({
       const lines = (el.text || '').split('\n');
       const canvas = canvasRef.current;
       const context = canvas?.getContext('2d');
-      if (context) context.font = `${fontSize}px 'Sansation', sans-serif`;
+      if (context) context.font = `${fontSize}px system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`;
       const measuredWidth = lines.reduce((width, line) => {
         const lineWidth = context?.measureText(line).width ?? line.length * fontSize * 0.6;
         return Math.max(width, lineWidth);
@@ -531,12 +536,13 @@ export default function DrawingCanvas({
           p2.y - headlen * Math.sin(angle + Math.PI / 6)
         );
         ctx.stroke();
-      } else if (el.type === 'text' && el.text) {
+      } else if (el.type === 'text' && (el.id === editingText?.id || el.text)) {
         const fSize = el.fontSize || 18;
-        ctx.font = `${fSize}px 'Sansation', sans-serif`;
+        ctx.font = `${fSize}px system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`;
         ctx.fillStyle = el.strokeColor || '#ffffff';
         ctx.textBaseline = 'top';
-        const lines = el.text.split('\n');
+        const text = el.id === editingText?.id ? editingText.text : el.text || '';
+        const lines = text.split('\n');
         lines.forEach((line, i) => {
           ctx.fillText(line, el.x, el.y + i * (fSize * 1.3));
         });
@@ -686,6 +692,8 @@ export default function DrawingCanvas({
     pan,
     selectedIds,
     selectionBox,
+    editingText?.id,
+    editingText?.text,
     tool,
     zoom,
   ]);
@@ -764,6 +772,10 @@ export default function DrawingCanvas({
     const clientY = e.clientY - rect.top;
     const worldPoint = screenToWorld(clientX, clientY);
 
+    editOnClickRef.current = null;
+    dragMovedRef.current = false;
+    dragStartClientRef.current = { x: e.clientX, y: e.clientY };
+
     broadcastCursor(worldPoint.x, worldPoint.y);
 
     // Pan com botão do meio ou Spacebar ou Tool Hand
@@ -801,6 +813,10 @@ export default function DrawingCanvas({
     if (tool === 'select') {
       const hit = [...elements].reverse().find((el) => isPointInElement(worldPoint, el));
       if (hit) {
+        if (hit.type === 'text' && selectedIds.includes(hit.id)) {
+          editOnClickRef.current = hit.id;
+        }
+
         if (e.shiftKey) {
           setSelectedIds((prev) =>
             prev.includes(hit.id) ? prev.filter((id) => id !== hit.id) : [...prev, hit.id]
@@ -852,6 +868,8 @@ export default function DrawingCanvas({
         worldX: worldPoint.x,
         worldY: worldPoint.y,
         text: '',
+        fontSize: 18,
+        color: strokeColor,
       });
       setTool('select');
       return;
@@ -929,6 +947,30 @@ export default function DrawingCanvas({
         strokeWidth,
       };
     }
+  };
+
+  const handleCanvasDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (tool !== 'select') return;
+
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const worldPoint = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+    const hit = [...elements].reverse().find(
+      (element) => element.type === 'text' && isPointInElement(worldPoint, element)
+    );
+    if (!hit) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedIds([hit.id]);
+    setEditingText({
+      id: hit.id,
+      worldX: hit.x,
+      worldY: hit.y,
+      text: hit.text || '',
+      fontSize: hit.fontSize || 18,
+      color: hit.strokeColor || '#ffffff',
+    });
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -1032,6 +1074,13 @@ export default function DrawingCanvas({
 
     // 2. Dragging Selected Elements
     if (mouseModeRef.current === 'dragging_elements' && dragSelectedIdsRef.current.length > 0) {
+      if (editOnClickRef.current && !dragMovedRef.current) {
+        const deltaX = e.clientX - dragStartClientRef.current.x;
+        const deltaY = e.clientY - dragStartClientRef.current.y;
+        if (Math.hypot(deltaX, deltaY) < 4) return;
+        dragMovedRef.current = true;
+      }
+
       const dx = worldPoint.x - startPointRef.current.x;
       const dy = worldPoint.y - startPointRef.current.y;
       const selectedSet = new Set(dragSelectedIdsRef.current);
@@ -1115,9 +1164,26 @@ export default function DrawingCanvas({
     }
 
     if (mouseModeRef.current === 'dragging_elements') {
+      const editTextId = editOnClickRef.current;
+      const shouldEditText = editTextId !== null && !dragMovedRef.current;
       mouseModeRef.current = 'idle';
       dragInitialElementsRef.current = [];
       dragSelectedIdsRef.current = [];
+      editOnClickRef.current = null;
+      if (shouldEditText) {
+        const textElement = elements.find((element) => element.id === editTextId);
+        if (textElement) {
+          setEditingText({
+            id: textElement.id,
+            worldX: textElement.x,
+            worldY: textElement.y,
+            text: textElement.text || '',
+            fontSize: textElement.fontSize || 18,
+            color: textElement.strokeColor || '#ffffff',
+          });
+          return;
+        }
+      }
       commitElements(elements);
       return;
     }
@@ -1722,6 +1788,7 @@ export default function DrawingCanvas({
       <canvas
         ref={canvasRef}
         onMouseDown={handleMouseDown}
+        onDoubleClick={handleCanvasDoubleClick}
         onMouseMove={handleMouseMove}
         onMouseLeave={() => {
           if (isCollaborative && notaId) broadcastCursor(0, 0, false);
@@ -1781,10 +1848,14 @@ export default function DrawingCanvas({
             position: 'absolute',
             left: `${editingText.worldX * zoom + pan.x}px`,
             top: `${editingText.worldY * zoom + pan.y}px`,
-            fontSize: `${18 * zoom}px`,
-            color: strokeColor,
-            fontFamily: "'Sansation', sans-serif",
+            fontSize: `${editingText.fontSize * zoom}px`,
+            color: 'transparent',
+            WebkitTextFillColor: 'transparent',
+            caretColor: editingText.color,
+            fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
             lineHeight: 1.3,
+            fontWeight: 400,
+            letterSpacing: 'normal',
             background: 'transparent',
             border: 'none',
             outline: 'none',

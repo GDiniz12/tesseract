@@ -4,30 +4,15 @@ import jwt from 'jsonwebtoken';
 import { randomUUID } from 'crypto';
 import { prisma } from '../config/prisma';
 import { deleteUploadedFile } from '../utils/fileStorage';
+import { createSessionToken, SESSION_COOKIE, SESSION_MAX_AGE_MS, sessionCookieOptions, setSessionCookie } from '../utils/session';
 import { AuthRequest } from '../middlewares/authMiddleware';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-for-dev';
-const SESSION_COOKIE = 'tesseract_session';
-const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-
-function isSecureRequest(req: Request) {
-  return req.secure || req.headers['x-forwarded-proto'] === 'https';
-}
-
-function sessionCookieOptions(req: Request) {
-  return {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production' || isSecureRequest(req),
-    sameSite: 'lax' as const,
-    path: '/',
-    maxAge: SESSION_MAX_AGE_MS,
-  };
-}
 
 function issueSession(req: Request, res: Response, userId: string, authVersion: number) {
-  const token = jwt.sign({ userId, authVersion }, JWT_SECRET, { expiresIn: '7d' });
+  const token = createSessionToken(userId, authVersion);
   if (req.get('x-session-mode') === 'cookie') {
-    res.cookie(SESSION_COOKIE, token, sessionCookieOptions(req));
+    setSessionCookie(req, res, token);
   }
   return token;
 }

@@ -80,7 +80,7 @@ export default function SettingsModal({
 
   // Appearance State
   const [fontSize, setFontSize] = useState(prefs.editorFontSize || '15px');
-  const [fontFamily, setFontFamily] = useState(prefs.editorFontFamily || 'Geist Sans');
+  const [fontFamily, setFontFamily] = useState(prefs.editorFontFamily || "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif");
 
   // Editor State
   const [editorWidth, setEditorWidth] = useState(prefs.editorWidth || '800px');
@@ -811,6 +811,7 @@ export default function SettingsModal({
                     }}
                     className="w-[240px] h-8 px-2.5 bg-[#141414] border border-white/10 focus:border-white/30 text-white rounded-none outline-none text-xs"
                   >
+                    <option value="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">Fonte do Sistema (Padrão do SO)</option>
                     <option value="Geist Sans">Geist Sans (Vercel Style)</option>
                     <option value="Inter">Inter</option>
                     <option value="Segoe UI">Segoe UI</option>

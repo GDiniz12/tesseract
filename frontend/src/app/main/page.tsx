@@ -13,6 +13,7 @@ import FlashcardsView from '@/components/FlashcardsView';
 import DrawingCanvas from '@/components/DrawingCanvas';
 import ShareWorkspaceModal from '@/components/ShareWorkspaceModal';
 import TesseractLogo from '@/components/TesseractLogo';
+import InlineAiStatus from '@/components/InlineAiStatus';
 
 type SidebarTab = 'notes' | 'graph' | 'flashcards' | 'ai';
 
@@ -717,10 +718,25 @@ export default function MainPage() {
   };
 
   const handleOpenNote = (nota: any) => {
-    const latestNota = notas.find((item) => item.id === nota.id) || nota;
-    setSelectedNota(latestNota);
-    setActiveTab('notes');
-    setOpenTabIds((prev) => (prev.includes(nota.id) ? prev : [...prev, nota.id]));
+    const openResolvedNote = (resolvedNota: any) => {
+      setSelectedNota(resolvedNota);
+      setActiveTab('notes');
+      setOpenTabIds((prev) => (prev.includes(resolvedNota.id) ? prev : [...prev, resolvedNota.id]));
+    };
+
+    const existingNota = notas.find((item) => item.id === nota.id);
+    if (existingNota) {
+      openResolvedNote(existingNota);
+      return;
+    }
+
+    // AI-created notes may not have reached the workspace list yet.
+    api(`/notas/${nota.id}`)
+      .then((resolvedNota) => {
+        setNotas((prev) => (prev.some((item) => item.id === resolvedNota.id) ? prev : [...prev, resolvedNota]));
+        openResolvedNote(resolvedNota);
+      })
+      .catch((error) => console.error('Erro ao abrir item criado pelo Tesseract AI:', error));
   };
 
   const handleCloseTab = (tabId: string, e?: React.MouseEvent) => {
@@ -866,12 +882,7 @@ export default function MainPage() {
             setOpenTabIds([firstTextNote.id]);
           }
 
-          // Inicializar pastas abertas por padrão
-          const expandedMap: Record<string, boolean> = {};
-          (pastasData || []).forEach((p: any) => {
-            expandedMap[p.id] = true;
-          });
-          setExpandedFolders(expandedMap);
+          setExpandedFolders({});
         } else {
           router.push('/dashboard');
         }
@@ -957,11 +968,7 @@ export default function MainPage() {
         setSelectedNota(null);
         setOpenTabIds([]);
       }
-      const expandedMap: Record<string, boolean> = {};
-      (pastasData || []).forEach((p: any) => {
-        expandedMap[p.id] = true;
-      });
-      setExpandedFolders(expandedMap);
+      setExpandedFolders({});
     } catch (err) {
       console.error('Erro ao trocar de workspace:', err);
     } finally {
@@ -2793,6 +2800,32 @@ export default function MainPage() {
                             className="w-full text-zinc-100 text-sm sm:text-base leading-relaxed select-text font-sansation"
                           >
                             <FormattedAiContent content={msg.conteudo} />
+                            {(msg.metadata?.createdEntities?.notesCreated?.length > 0 || msg.metadata?.createdEntities?.drawingsCreated?.length > 0) && (
+                              <div className="mt-3 flex flex-col gap-1.5">
+                                {msg.metadata.createdEntities.notesCreated?.map((nota: { id: string; titulo: string }) => (
+                                  <button
+                                    key={nota.id}
+                                    type="button"
+                                    onClick={() => handleOpenNote({ id: nota.id })}
+                                    className="flex items-center justify-between gap-3 border border-white/10 bg-[#181818] px-3 py-2 text-left text-xs transition-colors hover:bg-white/5"
+                                  >
+                                    <span className="min-w-0 truncate font-medium text-zinc-200">Nota criada: {nota.titulo}</span>
+                                    <span className="shrink-0 font-mono text-[11px] text-zinc-400">Abrir ↗</span>
+                                  </button>
+                                ))}
+                                {msg.metadata.createdEntities.drawingsCreated?.map((desenho: { id: string; titulo: string }) => (
+                                  <button
+                                    key={desenho.id}
+                                    type="button"
+                                    onClick={() => handleOpenNote({ id: desenho.id, tipo: 'desenho' })}
+                                    className="flex items-center justify-between gap-3 border border-white/10 bg-[#181818] px-3 py-2 text-left text-xs transition-colors hover:bg-white/5"
+                                  >
+                                    <span className="min-w-0 truncate font-medium text-zinc-200">Canvas criado: {desenho.titulo}</span>
+                                    <span className="shrink-0 font-mono text-[11px] text-zinc-400">Abrir canvas ↗</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -2804,13 +2837,10 @@ export default function MainPage() {
                     <div ref={streamingResponseRef} className="w-full flex justify-start">
                       <div className="flex items-start gap-2.5 text-zinc-400 select-none py-2 animate-in fade-in duration-200">
                         <TesseractLogo size={18} variant="ai" className="text-zinc-300 shrink-0" />
-                        <div className="flex flex-col gap-1 text-sm font-sansation text-zinc-400">
-                          {(aiActivity.length > 0 ? aiActivity : ['Conectando ao assistente.']).map((activity, index) => (
-                            <span key={`${activity}-${index}`} className={index === aiActivity.length - 1 ? 'text-zinc-200' : 'text-zinc-500'}>
-                              {activity}
-                            </span>
-                          ))}
-                        </div>
+                        <InlineAiStatus
+                          label={aiActivity[aiActivity.length - 1] || 'Conectando ao assistente.'}
+                          className="text-sm"
+                        />
                       </div>
                     </div>
                   )}
@@ -2818,7 +2848,8 @@ export default function MainPage() {
                   {/* Fluxo de Resposta em tempo real (Streaming) */}
                   {isAiLoading && aiStreamingText && (
                     <div className="w-full flex justify-start">
-                      <div className="w-full text-zinc-100 text-sm sm:text-base leading-relaxed select-text font-sansation">
+                      <div className="w-full space-y-2 text-zinc-100 text-sm sm:text-base leading-relaxed select-text font-sansation">
+                        <InlineAiStatus label="Escrevendo resposta" state="writing" className="text-xs" />
                         <FormattedAiContent content={aiStreamingText} />
                       </div>
                     </div>
@@ -3130,7 +3161,7 @@ export default function MainPage() {
                   value={selectedNota.conteudo || ''}
                   onChange={handleContentChange}
                   placeholder="Comece a escrever sua nota... Digite '/' para comandos"
-                  fontFamily="'Sansation', sans-serif"
+                  fontFamily="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
                   fontSize="16px"
                   notas={notas}
                   workspaceId={activeWorkspace?.id}

@@ -125,13 +125,62 @@ export default function FormattedAiContent({ content }: FormattedAiContentProps)
   };
 
   const renderInlineFormatting = (chunk: string, key: string): React.ReactNode => {
-    const lines = chunk.split('\n');
+    const lines = chunk.replace(/\\(?=\s*(?:[-*_]\s*){3,}\s*$)/gm, '').split('\n');
+    const renderedLines: React.ReactNode[] = [];
 
-    return (
-      <div key={key} className="space-y-2">
-        {lines.map((line, lineIdx) => {
+    for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+      const line = lines[lineIdx];
+      if (!line.trim()) {
+        renderedLines.push(<div key={`space-${lineIdx}`} className="h-2" />);
+        continue;
+      }
+
+      // Markdown horizontal rules (---, ***, ___), including escaped variants.
+      if (/^\s*(?:(?:-\s*){3,}|(?:\*\s*){3,}|(?:_\s*){3,})\s*$/.test(line)) {
+        renderedLines.push(<hr key={`rule-${lineIdx}`} className="my-3 border-0 border-t border-white/15" />);
+        continue;
+      }
+
+      // Group adjacent Markdown list items into a single semantic list.
+      const bulletMatch = line.match(/^\s*[-*+]\s+(.*)$/);
+      if (bulletMatch) {
+        const items: string[] = [];
+        while (lineIdx < lines.length) {
+          const itemMatch = lines[lineIdx].match(/^\s*[-*+]\s+(.*)$/);
+          if (!itemMatch) break;
+          items.push(itemMatch[1]);
+          lineIdx++;
+        }
+        lineIdx--;
+        renderedLines.push(
+          <ul key={`list-${lineIdx}`} className="my-1 list-disc space-y-1 pl-6 text-sm sm:text-[15px] font-sansation text-zinc-200 leading-relaxed">
+            {items.map((item, itemIdx) => <li key={itemIdx}>{parseInlineSpans(item)}</li>)}
+          </ul>
+        );
+        continue;
+      }
+
+      const orderedMatch = line.match(/^\s*(\d+)[.)]\s+(.*)$/);
+      if (orderedMatch) {
+        const items: string[] = [];
+        while (lineIdx < lines.length) {
+          const itemMatch = lines[lineIdx].match(/^\s*\d+[.)]\s+(.*)$/);
+          if (!itemMatch) break;
+          items.push(itemMatch[1]);
+          lineIdx++;
+        }
+        lineIdx--;
+        renderedLines.push(
+          <ol key={`ordered-list-${lineIdx}`} className="my-1 list-decimal space-y-1 pl-6 text-sm sm:text-[15px] font-sansation text-zinc-200 leading-relaxed">
+            {items.map((item, itemIdx) => <li key={itemIdx}>{parseInlineSpans(item)}</li>)}
+          </ol>
+        );
+        continue;
+      }
+
+      {
           if (!line.trim()) {
-            return <div key={lineIdx} className="h-2" />;
+            continue;
           }
 
           // Markdown Image standalone line
@@ -139,7 +188,7 @@ export default function FormattedAiContent({ content }: FormattedAiContentProps)
           if (imgMatch) {
             const altText = imgMatch[1] || 'Imagem';
             const src = imgMatch[2];
-            return (
+            renderedLines.push(
               <div key={lineIdx} className="my-3 max-w-xl rounded-none border border-white/10 bg-[#161616] overflow-hidden shadow-lg">
                 <img
                   src={src}
@@ -154,55 +203,38 @@ export default function FormattedAiContent({ content }: FormattedAiContentProps)
                 )}
               </div>
             );
+            continue;
           }
 
           // Headers
           if (line.startsWith('### ')) {
-            return (
+            renderedLines.push(
               <h3 key={lineIdx} className="text-base font-bold font-sansation text-white mt-3 mb-1 tracking-tight">
                 {parseInlineSpans(line.replace('### ', ''))}
               </h3>
             );
+            continue;
           }
           if (line.startsWith('## ')) {
-            return (
+            renderedLines.push(
               <h2 key={lineIdx} className="text-lg font-bold font-sansation text-white mt-4 mb-1.5 tracking-tight border-b border-white/5 pb-1">
                 {parseInlineSpans(line.replace('## ', ''))}
               </h2>
             );
+            continue;
           }
           if (line.startsWith('# ')) {
-            return (
+            renderedLines.push(
               <h1 key={lineIdx} className="text-xl font-bold font-sansation text-white mt-5 mb-2 tracking-tight">
                 {parseInlineSpans(line.replace('# ', ''))}
               </h1>
             );
-          }
-
-          // Bullet lists
-          if (line.startsWith('- ') || line.startsWith('* ')) {
-            return (
-              <div key={lineIdx} className="flex items-start gap-2 pl-2 text-sm sm:text-[15px] font-sansation text-zinc-200 leading-relaxed">
-                <span className="text-zinc-500 mt-1 shrink-0">•</span>
-                <span className="flex-1">{parseInlineSpans(line.substring(2))}</span>
-              </div>
-            );
-          }
-
-          // Numbered lists
-          const numMatch = line.match(/^(\d+)\.\s+(.*)$/);
-          if (numMatch) {
-            return (
-              <div key={lineIdx} className="flex items-start gap-2 pl-2 text-sm sm:text-[15px] font-sansation text-zinc-200 leading-relaxed">
-                <span className="text-zinc-500 font-mono text-xs min-w-[18px] shrink-0 mt-0.5">{numMatch[1]}.</span>
-                <span className="flex-1">{parseInlineSpans(numMatch[2])}</span>
-              </div>
-            );
+            continue;
           }
 
           // Blockquote
           if (line.startsWith('> ')) {
-            return (
+            renderedLines.push(
               <blockquote
                 key={lineIdx}
                 className="border-l-2 border-zinc-600 pl-3.5 py-0.5 text-sm sm:text-[15px] font-sansation text-zinc-400 italic my-1"
@@ -210,17 +242,19 @@ export default function FormattedAiContent({ content }: FormattedAiContentProps)
                 {parseInlineSpans(line.replace('> ', ''))}
               </blockquote>
             );
+            continue;
           }
 
           // Regular paragraph
-          return (
+          renderedLines.push(
             <p key={lineIdx} className="text-sm sm:text-[15px] font-sansation text-zinc-200 leading-relaxed break-words">
               {parseInlineSpans(line)}
             </p>
           );
-        })}
-      </div>
-    );
+      }
+    }
+
+    return <div key={key} className="space-y-2">{renderedLines}</div>;
   };
 
   const parseInlineSpans = (text: string): React.ReactNode[] => {

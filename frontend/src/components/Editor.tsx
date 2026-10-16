@@ -11,6 +11,7 @@ import { marked } from 'marked';
 import { parseYouTubeVideoId, getYouTubeEmbedUrl } from '@/lib/youtube';
 import { extractGraphLinks } from '@/lib/graphLinks';
 import { sanitizeHtml } from '@/lib/sanitizeHtml';
+import { RailToc, ScrollProgress, type NoteSection, type RailTocItem } from './NoteReadingNavigation';
 
 // Configure marked for rich GFM parsing
 marked.setOptions({
@@ -42,6 +43,54 @@ export function ensureHtmlContent(raw: string): string {
   } catch (err) {
     return sanitizeHtml(formatted);
   }
+}
+
+const codeTokenPattern = /(\/\*[\s\S]*?\*\/|\/\/[^\n]*|`(?:\\.|[^`])*`|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b(?:async|await|break|case|catch|class|const|continue|def|else|export|extends|false|for|from|function|if|import|in|interface|let|new|null|return|static|switch|this|throw|true|try|type|var|while|yield)\b|\b\d+(?:\.\d+)?\b|\b[A-Z][A-Za-z0-9_]*\b|\b[A-Za-z_$][\w$]*(?=\s*\())/g;
+
+function escapeCodeText(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function readCodeBlockSource(pre: HTMLPreElement): string {
+  const code = pre.querySelector('code');
+  if (!code) return '';
+  const lines = Array.from(code.querySelectorAll<HTMLElement>(':scope > .note-code-line'));
+  if (lines.length) return lines.map((line) => line.innerText.replace(/\n$/, '')).join('\n');
+  return code.innerText.replace(/\r/g, '').replace(/\n$/, '');
+}
+
+function highlightCodeBlock(pre: HTMLPreElement): void {
+  const code = pre.querySelector('code');
+  if (!code) return;
+  const source = readCodeBlockSource(pre);
+  const lines = source.split('\n');
+  pre.dataset.lineCount = String(lines.length);
+  code.innerHTML = lines.map((line, lineIndex) => {
+    let cursor = 0;
+    const tokens: string[] = [];
+    codeTokenPattern.lastIndex = 0;
+    for (const match of line.matchAll(codeTokenPattern)) {
+      const token = match[0];
+      const index = match.index ?? 0;
+      if (index > cursor) tokens.push(escapeCodeText(line.slice(cursor, index)));
+      const type = token.startsWith('//') || token.startsWith('/*')
+        ? 'comment'
+        : token.startsWith('"') || token.startsWith("'") || token.startsWith('`')
+          ? 'string'
+          : /^\d/.test(token)
+            ? 'number'
+            : /^(async|await|break|case|catch|class|const|continue|def|else|export|extends|false|for|from|function|if|import|in|interface|let|new|null|return|static|switch|this|throw|true|try|type|var|while|yield)$/.test(token)
+              ? 'keyword'
+              : /^[A-Z]/.test(token)
+                ? 'type'
+                : 'function';
+      tokens.push(`<span class="note-code-token-${type}">${escapeCodeText(token)}</span>`);
+      cursor = index + token.length;
+    }
+    if (cursor < line.length) tokens.push(escapeCodeText(line.slice(cursor)));
+    return `<span class="note-code-line" data-line="${lineIndex + 1}">${tokens.join('') || '<br>'}</span>`;
+  }).join('');
+  code.classList.add('note-code-highlighted');
 }
 
 interface EditorProps {
@@ -163,6 +212,112 @@ function Editor({
   onCollaboratorsChange
 }: EditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
+  const readingScrollContainerRef = useRef<HTMLElement | null>(null);
+  const hoveredCodeBlockRef = useRef<HTMLPreElement | null>(null);
+  const activeCodeBlockRef = useRef<HTMLPreElement | null>(null);
+  const [noteSections, setNoteSections] = useState<NoteSection[]>([]);
+  const [activeNoteSectionId, setActiveNoteSectionId] = useState<string | null>(null);
+  const [readingProgress, setReadingProgress] = useState(0);
+  const [codeBlockControl, setCodeBlockControl] = useState<{ top: number; left: number } | null>(null);
+  const [copiedCodeBlock, setCopiedCodeBlock] = useState(false);
+  const codeCopyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [railPosition, setRailPosition] = useState<{ left: number } | null>(null);
+  const [scrollContainerEl, setScrollContainerEl] = useState<HTMLElement | null>(null);
+
+  const updateRailPosition = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const rect = editor.getBoundingClientRect();
+    const is2xl = typeof window !== 'undefined' && window.innerWidth >= 1536;
+    const tocWidth = is2xl ? 208 : 176;
+    const gap = 16;
+    setRailPosition({ left: Math.max(16, Math.round(rect.left - tocWidth - gap)) });
+  }, []);
+
+  useEffect(() => {
+    updateRailPosition();
+    window.addEventListener('resize', updateRailPosition);
+    const editor = editorRef.current;
+    const resizeObserver = typeof ResizeObserver !== 'undefined' && editor
+      ? new ResizeObserver(updateRailPosition)
+      : null;
+    if (editor && resizeObserver) resizeObserver.observe(editor);
+
+    return () => {
+      window.removeEventListener('resize', updateRailPosition);
+      resizeObserver?.disconnect();
+    };
+  }, [updateRailPosition]);
+
+  const refreshNoteSections = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const headings = Array.from(editor.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6'));
+    const noteKey = (notaId || 'note').replace(/[^a-zA-Z0-9_-]/g, '-');
+    const nextSections = headings.flatMap((heading, index) => {
+      const label = heading.innerText.trim();
+      if (!label) return [];
+      if (!heading.id) heading.id = `note-${noteKey}-section-${index + 1}`;
+      return [{ id: heading.id, label, level: Number(heading.tagName.slice(1)) }];
+    });
+
+    editor.querySelectorAll<HTMLPreElement>('pre').forEach((pre) => {
+      const codeClass = pre.querySelector('code')?.className || '';
+      const language = codeClass.match(/(?:^|\s)language-([\w+-]+)/)?.[1];
+      pre.dataset.language = language || pre.dataset.language || 'texto';
+      if (!pre.querySelector('code')) {
+        const code = document.createElement('code');
+        code.textContent = pre.innerText;
+        pre.replaceChildren(code);
+      }
+      if (!pre.querySelector('code')?.classList.contains('note-code-highlighted')) {
+        highlightCodeBlock(pre);
+      }
+    });
+
+    setNoteSections((previous) => {
+      const unchanged = previous.length === nextSections.length && previous.every((section, index) => (
+        section.id === nextSections[index]?.id &&
+        section.label === nextSections[index]?.label &&
+        section.level === nextSections[index]?.level
+      ));
+      return unchanged ? previous : nextSections;
+    });
+  }, [notaId]);
+
+  const updateCodeBlockControlPosition = useCallback(() => {
+    const pre = hoveredCodeBlockRef.current;
+    if (!pre?.isConnected) {
+      hoveredCodeBlockRef.current = null;
+      setCodeBlockControl(null);
+      return;
+    }
+    const rect = pre.getBoundingClientRect();
+    setCodeBlockControl({ top: rect.top + 5, left: Math.max(8, rect.right - 78) });
+  }, []);
+
+  const updateCodeBlockControlFromTarget = useCallback((target: EventTarget | null) => {
+    const targetElement = target instanceof HTMLElement ? target : null;
+    if (targetElement?.closest('[data-note-code-copy]')) return;
+
+    const pre = targetElement?.closest('pre');
+    if (!pre || !editorRef.current?.contains(pre)) {
+      if (hoveredCodeBlockRef.current) {
+        hoveredCodeBlockRef.current = null;
+        setCodeBlockControl(null);
+        setCopiedCodeBlock(false);
+      }
+      return;
+    }
+
+    if (hoveredCodeBlockRef.current !== pre) {
+      hoveredCodeBlockRef.current = pre as HTMLPreElement;
+      setCopiedCodeBlock(false);
+      updateCodeBlockControlPosition();
+    }
+  }, [updateCodeBlockControlPosition]);
+
   const plainText = useMemo(() => {
     const htmlWithLineBreaks = (value || '')
       .replace(/<br\s*\/?\s*>/gi, '\n')
@@ -175,10 +330,154 @@ function Editor({
   const trimmedText = plainText.trim();
   const wordCount = trimmedText ? trimmedText.split(/\s+/).length : 0;
   const characterCount = plainText.length;
+  const readingProgressPercent = Math.round(readingProgress * 100);
   const connectionCount = useMemo(
     () => extractGraphLinks(notas).filter((link) => link.source === notaId || link.target === notaId).length,
     [notas, notaId]
   );
+  const railTocItems = useMemo<RailTocItem[]>(() => {
+    if (noteSections.length === 0) return [];
+    const minLevel = Math.min(...noteSections.map((s) => s.level));
+    return noteSections.map((section) => ({
+      id: section.id,
+      label: section.label,
+      depth: Math.max(0, section.level - minLevel),
+    }));
+  }, [noteSections]);
+
+  const updateReadingProgress = useCallback(() => {
+    const scrollContainer = readingScrollContainerRef.current;
+    if (!scrollContainer) return;
+
+    const scrollableHeight = scrollContainer.scrollHeight - scrollContainer.clientHeight;
+    const progress = scrollableHeight > 0 ? scrollContainer.scrollTop / scrollableHeight : 0;
+    setReadingProgress(Math.min(1, Math.max(0, progress)));
+
+    const headings = Array.from(editorRef.current?.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6') || []);
+    const anchorY = scrollContainer.getBoundingClientRect().top + 120;
+    let currentSectionId: string | null = headings[0]?.id || null;
+    for (const heading of headings) {
+      if (heading.getBoundingClientRect().top <= anchorY) currentSectionId = heading.id;
+    }
+    setActiveNoteSectionId((previous) => previous === currentSectionId ? previous : currentSectionId);
+    updateCodeBlockControlPosition();
+  }, [updateCodeBlockControlPosition]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    let scrollContainer: HTMLElement | null = editor.parentElement;
+    while (scrollContainer) {
+      const overflowY = window.getComputedStyle(scrollContainer).overflowY;
+      if (overflowY === 'auto' || overflowY === 'scroll') break;
+      scrollContainer = scrollContainer.parentElement;
+    }
+
+    if (!scrollContainer) return;
+    readingScrollContainerRef.current = scrollContainer;
+    setScrollContainerEl(scrollContainer);
+
+    scrollContainer.addEventListener('scroll', updateReadingProgress, { passive: true });
+    window.addEventListener('resize', updateReadingProgress);
+    const resizeObserver = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(updateReadingProgress)
+      : null;
+    resizeObserver?.observe(scrollContainer);
+    resizeObserver?.observe(editor);
+    updateReadingProgress();
+
+    return () => {
+      scrollContainer?.removeEventListener('scroll', updateReadingProgress);
+      window.removeEventListener('resize', updateReadingProgress);
+      resizeObserver?.disconnect();
+      readingScrollContainerRef.current = null;
+      setScrollContainerEl(null);
+    };
+  }, [updateReadingProgress]);
+
+  useEffect(() => {
+    refreshNoteSections();
+    updateReadingProgress();
+  }, [value, refreshNoteSections, updateReadingProgress]);
+
+  const selectNoteSection = useCallback((sectionId: string) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const escapedId = typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+      ? CSS.escape(sectionId)
+      : sectionId.replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+
+    const heading =
+      editor.querySelector<HTMLElement>(`#${escapedId}`) ||
+      document.getElementById(sectionId) ||
+      Array.from(editor.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6'))
+        .find((h) => h.id === sectionId);
+
+    if (!heading) return;
+
+    // Find the scroll container (page's main or nearest scrollable ancestor)
+    let scrollContainer = readingScrollContainerRef.current;
+    if (!scrollContainer || !scrollContainer.isConnected) {
+      let el: HTMLElement | null = editor.parentElement;
+      while (el) {
+        const style = window.getComputedStyle(el);
+        if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+          scrollContainer = el;
+          break;
+        }
+        el = el.parentElement;
+      }
+      if (scrollContainer) {
+        readingScrollContainerRef.current = scrollContainer;
+      }
+    }
+
+    if (scrollContainer) {
+      const containerRect = scrollContainer.getBoundingClientRect();
+      const headingRect = heading.getBoundingClientRect();
+      const targetScrollTop = scrollContainer.scrollTop + (headingRect.top - containerRect.top) - 48;
+
+      scrollContainer.scrollTo({
+        top: Math.max(0, targetScrollTop),
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+      });
+    } else {
+      heading.scrollIntoView({
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+        block: 'start',
+      });
+    }
+
+    setActiveNoteSectionId(sectionId);
+  }, []);
+
+  const handleCodeBlockCopy = async () => {
+    const codeBlock = hoveredCodeBlockRef.current;
+    if (!codeBlock) return;
+
+    try {
+      const code = readCodeBlockSource(codeBlock);
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(code);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = code;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        textarea.remove();
+      }
+      setCopiedCodeBlock(true);
+      if (codeCopyTimeoutRef.current) clearTimeout(codeCopyTimeoutRef.current);
+      codeCopyTimeoutRef.current = setTimeout(() => setCopiedCodeBlock(false), 1600);
+    } catch (error) {
+      console.error('Não foi possível copiar o bloco de código.', error);
+    }
+  };
 
   // Track cursor line number in contentEditable (1 to infinity, counting both Enter and wrapped visual lines)
   const updateCursorLine = useCallback(() => {
@@ -242,16 +541,6 @@ function Editor({
     }
   }, [onCursorLineChange]);
 
-  useEffect(() => {
-    const handleSelectionChange = () => {
-      updateCursorLine();
-    };
-    document.addEventListener('selectionchange', handleSelectionChange);
-    return () => {
-      document.removeEventListener('selectionchange', handleSelectionChange);
-    };
-  }, [updateCursorLine]);
-
   const { users, cursors, broadcastChange, broadcastTextSelection } = require('../hooks/useCollaboration').useCollaboration(
     isCollaborative && notaId ? `${workspaceId}:${notaId}` : undefined,
     'document_change',
@@ -260,6 +549,8 @@ function Editor({
       parentOnChange(safeValue);
       if (editorRef.current && editorRef.current.innerHTML !== newVal) {
         editorRef.current.innerHTML = safeValue;
+        refreshNoteSections();
+        updateReadingProgress();
       }
     }
   );
@@ -297,6 +588,23 @@ function Editor({
     parentOnChange(val);
     broadcastChange(val);
   }, [parentOnChange, broadcastChange]);
+
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      updateCursorLine();
+      const activeCodeBlock = activeCodeBlockRef.current;
+      const selection = window.getSelection();
+      if (activeCodeBlock && (!selection?.anchorNode || !activeCodeBlock.contains(selection.anchorNode))) {
+        highlightCodeBlock(activeCodeBlock);
+        activeCodeBlockRef.current = null;
+        if (editorRef.current) onChange(editorRef.current.innerHTML);
+      }
+    };
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+    };
+  }, [onChange, updateCursorLine]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const wikiMenuRef = useRef<HTMLDivElement>(null);
@@ -444,8 +752,14 @@ function Editor({
   useEffect(() => {
     if (editorRef.current && !isInitializedRef.current) {
       editorRef.current.innerHTML = ensureHtmlContent(initialValueRef.current);
+      refreshNoteSections();
+      updateReadingProgress();
       isInitializedRef.current = true;
     }
+  }, [refreshNoteSections, updateReadingProgress]);
+
+  useEffect(() => () => {
+    if (codeCopyTimeoutRef.current) clearTimeout(codeCopyTimeoutRef.current);
   }, []);
 
   // Global mousemove & mouseup for image & drawing resizing
@@ -496,11 +810,22 @@ function Editor({
 
   const handleInput = () => {
     if (!editorRef.current) return;
+    refreshNoteSections();
+    updateCodeBlockControlPosition();
     onChange(editorRef.current.innerHTML);
     updateCursorLine();
     checkSlashTrigger();
     checkWikiTrigger();
     checkSelection();
+  };
+
+  const handleEditorBlur = () => {
+    const pre = activeCodeBlockRef.current;
+    const editor = editorRef.current;
+    if (!pre?.isConnected || !editor) return;
+    highlightCodeBlock(pre);
+    activeCodeBlockRef.current = null;
+    onChange(editor.innerHTML);
   };
 
   // Helper to remove the typed slash command text (/query)
@@ -1088,12 +1413,13 @@ function Editor({
 
     if (tag === 'pre') {
       const pre = document.createElement('pre');
+      pre.dataset.language = 'texto';
       const code = document.createElement('code');
       pre.appendChild(code);
 
       if (blockEl && blockEl !== editorRef.current) {
-        const rawText = blockEl.innerText.trim();
-        code.innerHTML = rawText ? blockEl.innerHTML : '<br>';
+        const rawText = blockEl.innerText.replace(/\r/g, '');
+        code.innerHTML = rawText.trim() ? escapeCodeText(rawText) : '<br>';
         blockEl.parentNode?.replaceChild(pre, blockEl);
       } else {
         code.innerHTML = '<br>';
@@ -1109,6 +1435,7 @@ function Editor({
       newRange.collapse(false);
       sel.removeAllRanges();
       sel.addRange(newRange);
+      refreshNoteSections();
       return;
     }
 
@@ -1289,6 +1616,7 @@ function Editor({
     if (!editorRef.current) return;
     editorRef.current.focus();
     document.execCommand('formatBlock', false, `<${headingTag}>`);
+    refreshNoteSections();
     onChange(editorRef.current.innerHTML);
     setTimeout(checkSelection, 50);
   };
@@ -1315,7 +1643,8 @@ function Editor({
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed && sel.rangeCount > 0) {
       const selectedText = sel.toString();
-      document.execCommand('insertHTML', false, `<pre><code>${selectedText}</code></pre>`);
+      document.execCommand('insertHTML', false, `<pre data-language="texto"><code>${escapeCodeText(selectedText)}</code></pre>`);
+      refreshNoteSections();
       onChange(editorRef.current.innerHTML);
     } else {
       transformCurrentBlockToElement('pre');
@@ -2100,6 +2429,8 @@ function Editor({
   // Handle mousedown on editor for Image & Drawing Resize Handles
   const handleMouseDown = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
+    const codeBlock = target.closest('pre');
+    if (codeBlock && editorRef.current?.contains(codeBlock)) activeCodeBlockRef.current = codeBlock as HTMLPreElement;
 
     // YouTube resize handle click
     if (target.classList.contains('synap-youtube-resize-handle')) {
@@ -2402,6 +2733,8 @@ function Editor({
     <div 
       className="relative w-full h-full flex flex-col cursor-text" 
       onClick={() => editorRef.current?.focus()}
+      onMouseMove={(event) => updateCodeBlockControlFromTarget(event.target)}
+      onMouseLeave={() => updateCodeBlockControlFromTarget(null)}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -3111,6 +3444,7 @@ function Editor({
         contentEditable={!readOnly}
         suppressContentEditableWarning
         onInput={handleInput}
+        onBlur={handleEditorBlur}
         onKeyDown={handleKeyDown}
         onKeyUp={handleKeyUp}
         onPaste={handlePaste}
@@ -3120,7 +3454,10 @@ function Editor({
           checkWikiTrigger();
           checkSelection();
         }}
-        onClick={handleEditorClick}
+        onClick={(event) => {
+          updateCodeBlockControlFromTarget(event.target);
+          handleEditorClick(event);
+        }}
         style={{
           fontFamily: fontFamily || 'inherit',
           fontSize: fontSize || '15px',
@@ -3129,10 +3466,57 @@ function Editor({
         data-placeholder={placeholder}
       />
 
-      <div className="pointer-events-none fixed bottom-4 right-4 z-[100] flex items-center gap-3 border border-[var(--accents-2)] bg-[var(--background)] px-3 py-1.5 text-[10px] text-[var(--accents-5)] shadow-lg" aria-label={`${wordCount} palavras, ${characterCount} caracteres, ${connectionCount} conexões`}>
+      <aside
+        aria-label="Sumário da nota"
+        className="fixed top-24 z-20 hidden w-44 2xl:w-52 xl:block pointer-events-auto"
+        style={{
+          left: railPosition ? `${railPosition.left}px` : undefined,
+          visibility: railPosition ? 'visible' : 'hidden',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="max-h-[calc(100vh-8rem)] overflow-y-auto no-scrollbar pr-1">
+          <RailToc
+            items={railTocItems}
+            containerRef={readingScrollContainerRef}
+            offset={96}
+            indent={12}
+            title="Nesta nota"
+            onSelect={selectNoteSection}
+          />
+        </div>
+      </aside>
+
+      {codeBlockControl && (
+        <button
+          type="button"
+          data-note-code-copy
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={handleCodeBlockCopy}
+          style={{ position: 'fixed', top: codeBlockControl.top, left: codeBlockControl.left }}
+          className="z-[105] inline-flex h-7 items-center gap-1.5 border border-[var(--accents-3)] bg-[var(--background)] px-2 text-[10px] text-[var(--accents-6)] shadow-md transition-colors hover:border-[var(--accents-5)] hover:text-[var(--foreground)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accents-5)]"
+          aria-label={copiedCodeBlock ? 'Código copiado' : 'Copiar bloco de código'}
+          title={copiedCodeBlock ? 'Código copiado' : 'Copiar código'}
+        >
+          {copiedCodeBlock ? (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="m5 12 4 4L19 6" />
+            </svg>
+          ) : (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="8" y="8" width="13" height="13" rx="1" />
+              <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" />
+            </svg>
+          )}
+          {copiedCodeBlock ? 'Copiado' : 'Copiar'}
+        </button>
+      )}
+
+      <div className="pointer-events-none fixed bottom-4 right-4 z-[100] flex items-center gap-3 border border-[var(--accents-2)] bg-[var(--background)] px-3 py-1.5 text-[10px] text-[var(--accents-5)] shadow-lg" aria-label={`${wordCount} palavras, ${characterCount} caracteres, ${connectionCount} conexões, ${readingProgressPercent}% da nota lida`}>
         <span><span className="font-mono text-[var(--foreground)]">{wordCount}</span> palavras</span>
         <span><span className="font-mono text-[var(--foreground)]">{characterCount}</span> caracteres</span>
         <span><span className="font-mono text-[var(--foreground)]">{connectionCount}</span> conexões</span>
+        <ScrollProgress progress={readingProgress} />
       </div>
 
       {/* Minimalist Floating Slash Command Menu with Side Explanation Modal */}

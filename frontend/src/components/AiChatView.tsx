@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { api } from '@/lib/api';
 import katex from 'katex';
 import TesseractLogo from './TesseractLogo';
+import InlineAiStatus from './InlineAiStatus';
 
 export interface AiChatThread {
   id: string;
@@ -354,6 +355,17 @@ export default function AiChatView({
   const [isLoading, setIsLoading] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const [toolLogs, setToolLogs] = useState<Array<{ name: string; status: 'running' | 'done'; info?: string }>>([]);
+  const latestToolLog = toolLogs[toolLogs.length - 1];
+  const aiStatusState = streamingText
+    ? 'writing'
+    : latestToolLog?.name.toLowerCase().includes('search')
+      ? 'researching'
+      : latestToolLog
+        ? 'analyzing'
+        : 'thinking';
+  const aiStatusLabel = streamingText
+    ? 'Escrevendo resposta'
+    : latestToolLog?.info || (latestToolLog ? 'Processando resultado' : 'Processando contexto e formulando resposta');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Advanced input features: toolbox & attached contexts
@@ -1181,39 +1193,15 @@ export default function AiChatView({
               <div className="flex-1 overflow-hidden space-y-2">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-semibold text-white">Tesseract AI</span>
-                  <span className="text-[10px] text-zinc-500 font-mono">Pensando...</span>
+                  <InlineAiStatus label={aiStatusLabel} state={aiStatusState} className="text-[10px]" />
                 </div>
-
-                {/* Tool Execution Badges */}
-                {toolLogs.map((log, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-center gap-2 text-xs font-mono text-zinc-400 bg-[#181818] px-2.5 py-1 rounded-none border border-white/10 w-fit"
-                  >
-                    {log.status === 'running' ? (
-                      <div className="w-2.5 h-2.5 rounded-full border-2 border-white border-t-transparent animate-spin" />
-                    ) : (
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5">
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                    )}
-                    <span>{log.info || log.name}</span>
-                  </div>
-                ))}
 
                 {streamingText ? (
                   <FormattedAiContent
                     content={streamingText}
                     onOpenNoteById={(noteId) => onOpenNota?.({ id: noteId })}
                   />
-                ) : (
-                  toolLogs.length === 0 && (
-                    <div className="flex items-center gap-2 text-xs text-zinc-500 py-1">
-                      <div className="w-2.5 h-2.5 rounded-full border-2 border-white border-t-transparent animate-spin" />
-                      <span>Processando contexto e formulando resposta...</span>
-                    </div>
-                  )
-                )}
+                ) : null}
               </div>
             </div>
           )}

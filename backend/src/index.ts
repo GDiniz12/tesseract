@@ -22,6 +22,7 @@ app.use(
       return callback(null, false);
     },
     credentials: false,
+    exposedHeaders: ['X-Session-Token'],
   })
 );
 app.use((req, res, next) => {
