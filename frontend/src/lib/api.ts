@@ -20,6 +20,7 @@ export const api = async (endpoint: string, options: ApiOptions = {}): Promise<a
   const headers: Record<string, string> = {
     ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     'X-Session-Mode': 'cookie',
+    'ngrok-skip-browser-warning': 'true',
     ...((fetchOptions.headers as Record<string, string>) || {}),
   };
 

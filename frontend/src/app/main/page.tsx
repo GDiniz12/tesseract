@@ -450,6 +450,7 @@ export default function MainPage() {
         headers: {
           'Content-Type': 'application/json',
           'X-Session-Mode': 'cookie',
+          'ngrok-skip-browser-warning': 'true',
         },
         body: JSON.stringify({
           threadId: selectedThread?.id,

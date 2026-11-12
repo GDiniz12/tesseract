@@ -746,6 +746,7 @@ export default function AiChatView({
         headers: {
           'Content-Type': 'application/json',
           'X-Session-Mode': 'cookie',
+          'ngrok-skip-browser-warning': 'true',
         },
         body: JSON.stringify({
           threadId: activeThreadId,
