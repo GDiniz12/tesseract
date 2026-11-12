@@ -12,6 +12,11 @@ import { parseYouTubeVideoId, getYouTubeEmbedUrl } from '@/lib/youtube';
 import { extractGraphLinks } from '@/lib/graphLinks';
 import { sanitizeHtml } from '@/lib/sanitizeHtml';
 import { RailToc, ScrollProgress, type NoteSection, type RailTocItem } from './NoteReadingNavigation';
+import {
+  getNormalizedBox,
+  renderDrawingElement,
+  resolveLinearPoints,
+} from '@/lib/excalidrawRenderer';
 
 // Configure marked for rich GFM parsing
 marked.setOptions({
@@ -1032,7 +1037,15 @@ function Editor({
     if (elements.length > 0) {
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       elements.forEach((el) => {
-        if (el.points && el.points.length > 0) {
+        if ((el.type === 'line' || el.type === 'arrow') && el.points && el.points.length > 0) {
+          const pts = resolveLinearPoints(el, elements);
+          pts.forEach((p: any) => {
+            minX = Math.min(minX, p.x);
+            minY = Math.min(minY, p.y);
+            maxX = Math.max(maxX, p.x);
+            maxY = Math.max(maxY, p.y);
+          });
+        } else if (el.points && el.points.length > 0) {
           el.points.forEach((p: any) => {
             minX = Math.min(minX, p.x);
             minY = Math.min(minY, p.y);
@@ -1040,15 +1053,16 @@ function Editor({
             maxY = Math.max(maxY, p.y);
           });
         } else {
-          minX = Math.min(minX, el.x);
-          minY = Math.min(minY, el.y);
-          maxX = Math.max(maxX, el.x + (el.width || 60));
-          maxY = Math.max(maxY, el.y + (el.height || 40));
+          const box = getNormalizedBox(el);
+          minX = Math.min(minX, box.x);
+          minY = Math.min(minY, box.y);
+          maxX = Math.max(maxX, box.x + Math.max(60, box.width));
+          maxY = Math.max(maxY, box.y + Math.max(40, box.height));
         }
       });
 
-      const drawWidth = maxX - minX || 1;
-      const drawHeight = maxY - minY || 1;
+      const drawWidth = Math.max(1, maxX - minX);
+      const drawHeight = Math.max(1, maxY - minY);
       const scale = Math.min(1.2, Math.min((width - 40) / drawWidth, (height - 40) / drawHeight));
       const offsetX = (width - drawWidth * scale) / 2 - minX * scale;
       const offsetY = (height - drawHeight * scale) / 2 - minY * scale;
@@ -1057,60 +1071,10 @@ function Editor({
       ctx.scale(scale, scale);
 
       elements.forEach((el) => {
-        ctx.save();
-        ctx.strokeStyle = el.strokeColor || '#ffffff';
-        ctx.fillStyle = el.fillColor || 'transparent';
-        ctx.lineWidth = el.strokeWidth || 2;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-
-        if (el.type === 'pencil' && el.points && el.points.length > 0) {
-          ctx.beginPath();
-          ctx.moveTo(el.points[0].x, el.points[0].y);
-          for (let i = 1; i < el.points.length; i++) {
-            ctx.lineTo(el.points[i].x, el.points[i].y);
-          }
-          ctx.stroke();
-        } else if (el.type === 'rectangle') {
-          if (el.fillColor && el.fillColor !== 'transparent') ctx.fillRect(el.x, el.y, el.width || 0, el.height || 0);
-          ctx.strokeRect(el.x, el.y, el.width || 0, el.height || 0);
-        } else if (el.type === 'ellipse') {
-          const cx = el.x + (el.width || 0) / 2;
-          const cy = el.y + (el.height || 0) / 2;
-          const rx = Math.abs(el.width || 0) / 2;
-          const ry = Math.abs(el.height || 0) / 2;
-          if (rx > 0 && ry > 0) {
-            ctx.beginPath();
-            ctx.ellipse(cx, cy, rx, ry, 0, 0, 2 * Math.PI);
-            if (el.fillColor && el.fillColor !== 'transparent') ctx.fill();
-            ctx.stroke();
-          }
-        } else if (el.type === 'line' && el.points && el.points.length >= 2) {
-          ctx.beginPath();
-          ctx.moveTo(el.points[0].x, el.points[0].y);
-          ctx.lineTo(el.points[1].x, el.points[1].y);
-          ctx.stroke();
-        } else if (el.type === 'arrow' && el.points && el.points.length >= 2) {
-          const p1 = el.points[0];
-          const p2 = el.points[1];
-          ctx.beginPath();
-          ctx.moveTo(p1.x, p1.y);
-          ctx.lineTo(p2.x, p2.y);
-          ctx.stroke();
-          const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
-          const headlen = 14;
-          ctx.beginPath();
-          ctx.moveTo(p2.x, p2.y);
-          ctx.lineTo(p2.x - headlen * Math.cos(angle - Math.PI / 6), p2.y - headlen * Math.sin(angle - Math.PI / 6));
-          ctx.moveTo(p2.x, p2.y);
-          ctx.lineTo(p2.x - headlen * Math.cos(angle + Math.PI / 6), p2.y - headlen * Math.sin(angle + Math.PI / 6));
-          ctx.stroke();
-        } else if (el.type === 'text' && el.text) {
-          ctx.font = '16px "Virgil", "Segoe UI", sans-serif';
-          ctx.fillStyle = el.strokeColor || '#ffffff';
-          ctx.fillText(el.text, el.x, el.y);
-        }
-        ctx.restore();
+        renderDrawingElement(ctx, el, {
+          allElements: elements,
+          isPreview: true,
+        });
       });
     }
 

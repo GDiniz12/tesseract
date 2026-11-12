@@ -2023,11 +2023,41 @@ export default function MainPage() {
 
                 {/* ABA 3: FLASHCARDS */}
                 {activeTab === 'flashcards' && (
-                  <div className="flex flex-col flex-1 p-2 text-xs text-zinc-400">
-                    <span className="font-medium text-zinc-300 mb-1.5">Flashcards</span>
-                    <p className="text-[11px] text-zinc-500 leading-relaxed">
-                      Baralhos de estudo com repetição espaçada.
+                  <div className="flex flex-col flex-1 p-2.5 text-xs text-zinc-400 font-sansation">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-bold text-xs text-zinc-200 uppercase tracking-wider font-mono">Anki SRS</span>
+                      <span className="text-[10px] font-mono px-1.5 py-0.2 bg-white/5 border border-white/10 text-zinc-400">
+                        SM-2 / V3
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-zinc-500 leading-relaxed mb-3">
+                      Sistema completo de repetição espaçada inspirado no Anki: sub-baralhos hierárquicos, omissão de palavras (Cloze), cartões invertidos e estatísticas de retenção.
                     </p>
+
+                    <div className="flex flex-col gap-1.5 pt-2 border-t border-white/5">
+                      <span className="text-[10px] uppercase font-mono font-semibold text-zinc-500">Atalhos Rápidos</span>
+                      <div className="flex items-center justify-between text-[11px] text-zinc-400">
+                        <span>Baralhos</span>
+                        <kbd className="font-mono text-[10px] px-1 bg-white/5 border border-white/10 text-zinc-300">D</kbd>
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] text-zinc-400">
+                        <span>Adicionar Cartão</span>
+                        <kbd className="font-mono text-[10px] px-1 bg-white/5 border border-white/10 text-zinc-300">A</kbd>
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] text-zinc-400">
+                        <span>Painel (Browse)</span>
+                        <kbd className="font-mono text-[10px] px-1 bg-white/5 border border-white/10 text-zinc-300">B</kbd>
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] text-zinc-400">
+                        <span>Estatísticas</span>
+                        <kbd className="font-mono text-[10px] px-1 bg-white/5 border border-white/10 text-zinc-300">T</kbd>
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] text-zinc-400">
+                        <span>Avaliar Revisão</span>
+                        <kbd className="font-mono text-[10px] px-1 bg-white/5 border border-white/10 text-zinc-300">Espaço / 1-4</kbd>
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -3081,6 +3111,7 @@ export default function MainPage() {
                   notas={notas}
                   workspaceId={activeWorkspace?.id}
                   isCollaborative={activeWorkspace?.isCollaborative}
+                  currentUserId={currentUser?.id}
                   onOpenNota={(nota) => handleOpenNote(nota)}
                 />
               </div>
@@ -3128,29 +3159,36 @@ export default function MainPage() {
                   placeholder="Nota sem título"
                   className="min-w-0 flex-1 min-h-[48px] shrink-0 resize-none overflow-hidden bg-transparent text-3xl sm:text-4xl font-bold font-sansation text-white placeholder-zinc-700 outline-none border-none p-0 leading-tight select-text whitespace-pre-wrap break-words [overflow-wrap:anywhere] block"
                 />
-                {activeWorkspace?.isCollaborative && noteCollaborators.length > 0 && (
-                  <div className="ml-auto mt-1 flex shrink-0 items-center gap-2" aria-label="Pessoas nesta nota">
-                    <div className="flex items-center -space-x-2">
-                      {noteCollaborators.map((user, index) => {
-                        const displayName = user.username ? `@${user.username}` : (user.name || 'Anônimo');
-                        return (
-                          <div key={user.id || index} className="group/note-collaborator relative">
-                            <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-none border-2 border-[#141414] bg-zinc-800 text-xs font-semibold text-white">
-                              {user.avatarUrl ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img src={user.avatarUrl} alt={displayName} className="h-full w-full object-cover" />
-                              ) : (user.name || user.username || 'U').charAt(0).toUpperCase()}
+                {(() => {
+                  const visibleCollaborators = noteCollaborators.filter(
+                    (user) => !currentUser?.id || (user.id !== currentUser.id && user.userId !== currentUser.id)
+                  );
+                  if (!activeWorkspace?.isCollaborative || visibleCollaborators.length === 0) return null;
+
+                  return (
+                    <div className="ml-auto mt-1 flex shrink-0 items-center gap-2" aria-label="Pessoas nesta nota">
+                      <div className="flex items-center -space-x-2">
+                        {visibleCollaborators.map((user, index) => {
+                          const displayName = user.username ? `@${user.username}` : (user.name || 'Anônimo');
+                          return (
+                            <div key={user.id || index} className="group/note-collaborator relative">
+                              <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-none border-2 border-[#141414] bg-zinc-800 text-xs font-semibold text-white">
+                                {user.avatarUrl ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img src={user.avatarUrl} alt={displayName} className="h-full w-full object-cover" />
+                                ) : (user.name || user.username || 'U').charAt(0).toUpperCase()}
+                              </div>
+                              <span className="pointer-events-none absolute right-0 top-full z-50 mt-2 hidden whitespace-nowrap rounded border border-white/10 bg-[#121212] px-2 py-1 text-[11px] text-white shadow-xl group-hover/note-collaborator:block">
+                                {displayName}
+                              </span>
                             </div>
-                            <span className="pointer-events-none absolute right-0 top-full z-50 mt-2 hidden whitespace-nowrap rounded border border-white/10 bg-[#121212] px-2 py-1 text-[11px] text-white shadow-xl group-hover/note-collaborator:block">
-                              {displayName}
-                            </span>
-                          </div>
-                        );
-                      })}
+                          );
+                        })}
+                      </div>
+                      {visibleCollaborators.length > 1 && <span className="text-xs text-zinc-500">{visibleCollaborators.length}</span>}
                     </div>
-                    {noteCollaborators.length > 1 && <span className="text-xs text-zinc-500">{noteCollaborators.length}</span>}
-                  </div>
-                )}
+                  );
+                })()}
               </div>
 
               {/* Conteúdo da Nota: Editor rico integrado à tela sem molduras */}

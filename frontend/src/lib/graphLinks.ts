@@ -87,6 +87,36 @@ export function extractGraphLinks(notas: NoteLinkItem[]): GraphLink[] {
         extracted.push({ source: sourceNota.id, target: canonicalTargetId });
       }
     }
+
+    // 5. Match embedded drawing blocks data-drawing-id="..."
+    const drawingEmbedRegex = /data-drawing-id=["']([^"']+)["']/gi;
+    while ((m = drawingEmbedRegex.exec(rawContent)) !== null) {
+      const rawTargetId = m[1].trim().toLowerCase();
+      const canonicalTargetId = idMap.get(rawTargetId);
+      if (canonicalTargetId && canonicalTargetId !== sourceNota.id) {
+        extracted.push({ source: sourceNota.id, target: canonicalTargetId });
+      }
+    }
+
+    // 6. If sourceNota is a drawing (or JSON array of elements), extract note_card references
+    if (sourceNota.tipo === 'desenho' || rawContent.trim().startsWith('[')) {
+      try {
+        const parsed = JSON.parse(rawContent);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((el: any) => {
+            if (el && el.type === 'note_card' && el.itemNota?.id) {
+              const targetId = String(el.itemNota.id).trim().toLowerCase();
+              const canonicalTargetId = idMap.get(targetId);
+              if (canonicalTargetId && canonicalTargetId !== sourceNota.id) {
+                extracted.push({ source: sourceNota.id, target: canonicalTargetId });
+              }
+            }
+          });
+        }
+      } catch {
+        // Ignore invalid JSON
+      }
+    }
   });
 
   // Deduplicate undirected edges

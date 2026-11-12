@@ -809,7 +809,7 @@ O usuário está visualizando/editando esta nota agora. Se ele pedir para resumi
         );
 
         const requestBody: Record<string, any> = {
-          model: process.env.SYNAP_AI_MODEL || process.env.AI_MODEL || process.env.OMNIROUTE_MODEL || 'auto/chat',
+          model: process.env.SYNAP_AI_MODEL || process.env.AI_MODEL || process.env.OMNIROUTE_MODEL || 'antigravity/gemini-3.8-flash-low',
           messages,
           tools,
           stream: true,

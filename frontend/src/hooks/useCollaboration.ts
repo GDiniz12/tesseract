@@ -135,7 +135,11 @@ export function useCollaboration(
         try {
           const data = JSON.parse(event.data);
           if (data.type === 'presence') {
-            setUsers(data.users || []);
+            const rawUsers = (data.users || []) as CollaboratorUser[];
+            const otherUsers = myUserId
+              ? rawUsers.filter((u) => u.id !== myUserId && (u as any).userId !== myUserId)
+              : rawUsers;
+            setUsers(otherUsers);
           } else if (data.type === 'cursor_move') {
             // Never track or display own cursor
             if (myUserId && data.userId === myUserId) {

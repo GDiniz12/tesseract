@@ -70,6 +70,7 @@ model Deck {
   id          String      @id @default(uuid())
   nome        String
   descricao   String?
+  options     Json?
   workspaceId String
   workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   parentId    String?
@@ -84,7 +85,17 @@ model Flashcard {
   id             String    @id @default(uuid())
   frente         String
   verso          String
-  tipo           String    @default("card") // "card" | "nota"
+  extra          String?
+  tipo           String    @default("basic") // "basic" | "basic_reversed" | "basic_optional_reversed" | "basic_type" | "cloze" | "card" | "nota"
+  clozeIndex     Int?
+  tags           String[]  @default([])
+  flag           Int       @default(0) // 0=none, 1=red, 2=orange, 3=green, 4=blue, 5=pink, 6=turquoise, 7=purple
+  state          String    @default("new") // "new" | "learning" | "review" | "relearning"
+  suspended      Boolean   @default(false)
+  buried         Boolean   @default(false)
+  lapses         Int       @default(0)
+  stepIndex      Int       @default(0)
+  reviewHistory  Json?     // Array of { date, grade, interval, ease, timeMs, state }
   deckId         String
   deck           Deck      @relation(fields: [deckId], references: [id], onDelete: Cascade)
   notaId         String?
@@ -92,7 +103,7 @@ model Flashcard {
   
   // SM-2 Spaced Repetition Fields
   reps           Int       @default(0)
-  interval       Int       @default(0) // Interval in days (0 for new)
+  interval       Int       @default(0) // Interval in days (0 for new / learning)
   easeFactor     Float     @default(2.5) // Standard starting ease factor
   proximaRevisao DateTime  @default(now())
   ultimaRevisao  DateTime?

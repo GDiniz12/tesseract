@@ -264,7 +264,7 @@ export default function RegisterPage() {
   return (
     <div className="min-h-screen w-full bg-[#141414] overflow-y-auto overflow-x-hidden font-sansation">
       <main className="min-h-screen w-full grid grid-cols-1 lg:grid-cols-[1fr_1fr] bg-[#141414]">
-        <aside className="relative min-h-[280px] lg:min-h-full overflow-hidden bg-white text-[#111113] p-7 sm:p-10 lg:p-14 flex flex-col justify-between">
+        <aside className="hidden lg:flex relative lg:min-h-full overflow-hidden bg-white text-[#111113] p-7 sm:p-10 lg:p-14 flex-col justify-between">
           <Link href="/" className="inline-flex w-fit items-center gap-3 text-[#111113]" title="Voltar ao início">
             <TesseractLogo size={36} className="[--foreground:#111113]" priority />
             <span className="text-lg font-semibold tracking-tight">Tesseract</span>
@@ -279,7 +279,7 @@ export default function RegisterPage() {
           </div>
           <div aria-hidden="true" />
         </aside>
-        <div className="min-h-[560px] px-6 py-12 sm:px-12 lg:px-16 xl:px-24 flex items-center justify-center">
+        <div className="min-h-screen lg:min-h-[560px] px-6 py-12 sm:px-12 lg:px-16 xl:px-24 flex items-center justify-center">
           <Suspense fallback={<div className="text-xs text-zinc-500 font-sansation">Carregando...</div>}>
             <RegisterForm />
           </Suspense>
